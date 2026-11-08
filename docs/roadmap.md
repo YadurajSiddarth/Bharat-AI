@@ -128,4 +128,14 @@ Every phase should be evaluated using measurable criteria:
 
 Initial development will use:
 
-- Apple MacBook Air M4 for
+- Apple MacBook Air M4 for for coding and lightweight experiments.
+
+- Google Colab for GPU-based experiments when available.
+
+- GitHub for version control.
+
+- Open-source tools and models where licensing permits.
+
+##Current Milestone
+
+Complete Phase 1 by selecting a suitable multilingual model, running our first inference experiment and establishing a baseline across our initial languages.
