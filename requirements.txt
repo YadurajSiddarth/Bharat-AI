@@ -7,3 +7,10 @@ jupyter
 numpy
 pandas
 matplotlib
+fastapi
+uvicorn[standard]
+pydantic>=2
+python-dotenv
+torch
+transformers
+accelerate
