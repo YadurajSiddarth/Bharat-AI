@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 from contextlib import asynccontextmanager
@@ -5,6 +6,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from model_service import ModelNotReady, ModelService
 from schemas import GenerateRequest, GenerateResponse, ModelStatus
@@ -34,6 +36,11 @@ app.add_middleware(
 )
 
 
+def _sse(event: str, data: dict) -> str:
+    # ensure_ascii=False keeps Kannada/Hindi/Malayalam readable in the stream
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 @app.get("/api/health")
 def health():
     return {"status": "ok", "model_state": service.state}
@@ -52,3 +59,22 @@ def generate(req: GenerateRequest):
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
+
+
+@app.post("/api/generate/stream")
+def generate_stream(req: GenerateRequest):
+    if service.state != "loaded":
+        raise HTTPException(status_code=503, detail=f"Model state is '{service.state}'")
+
+    def events():
+        try:
+            for item in service.generate_stream(req.prompt, req.max_new_tokens):
+                yield _sse(item["event"], item["data"])
+        except Exception as exc:
+            yield _sse("error", {"message": f"{type(exc).__name__}: {exc}"})
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
