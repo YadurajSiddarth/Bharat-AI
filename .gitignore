@@ -14,8 +14,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
 parts/
 sdist/
 var/
@@ -239,4 +237,11 @@ __pycache__/
 # Private data
 data/raw/
 data/private/
-.env
+
+# Environment variables
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+frontend/dist/
