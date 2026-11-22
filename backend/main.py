@@ -11,6 +11,9 @@ from fastapi.responses import StreamingResponse
 from model_service import ModelNotReady, ModelService
 from schemas import GenerateRequest, GenerateResponse, ModelStatus
 
+from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
+
 load_dotenv()
 
 service = ModelService(
@@ -62,19 +65,35 @@ def generate(req: GenerateRequest):
 
 
 @app.post("/api/generate/stream")
-def generate_stream(req: GenerateRequest):
+async def generate_stream(req: GenerateRequest, request: Request):
     if service.state != "loaded":
         raise HTTPException(status_code=503, detail=f"Model state is '{service.state}'")
 
-    def events():
+    cancel = threading.Event()
+    gen = service.generate_stream(req.prompt, req.max_new_tokens, cancel=cancel)
+    finished = object()
+
+    async def events():
         try:
-            for item in service.generate_stream(req.prompt, req.max_new_tokens):
+            while True:
+                if await request.is_disconnected():
+                    cancel.set()
+                    break
+                item = await run_in_threadpool(next, gen, finished)
+                if item is finished:
+                    break
                 yield _sse(item["event"], item["data"])
         except Exception as exc:
             yield _sse("error", {"message": f"{type(exc).__name__}: {exc}"})
+        finally:
+            cancel.set()
+            try:
+                await run_in_threadpool(gen.close)
+            except ValueError:
+                pass  # generator still mid-step; it exits on its own now that cancel is set
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    )    

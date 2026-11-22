@@ -229,15 +229,19 @@ class ModelService:
             }
 
     # ---------- inference (streaming) ----------
-    def generate_stream(self, prompt: str, max_new_tokens: int = 128) -> Iterator[dict]:
+    def generate_stream(self, prompt: str, max_new_tokens: int = 128,
+                        cancel: Optional[threading.Event] = None) -> Iterator[dict]:
         """Yield events: {"event": "stage"|"token"|"done"|"error", "data": {...}}.
 
         Measurement notes:
-          model_inference  = time from calling generate() to the FIRST token
-                             (prefill plus generate() setup).
-          token_generation = first token to last token.
+          model_inference   = time from calling generate() to the FIRST token
+                              (prefill plus generate() setup).
+          token_generation  = first token to last token.
           response_decoding = the final full decode pass; per-token decoding for
-                             the live text happens during token_generation.
+                              the live text happens during token_generation.
+
+        If `cancel` is set (for example when the client disconnects), generation
+        stops at the next token and the lock is released.
         """
         if self.state != "loaded":
             raise ModelNotReady(f"Model state is '{self.state}'")
@@ -248,7 +252,8 @@ class ModelService:
             stages[name] = _stage(name, status, duration_ms, measurement, note)
             return {"event": "stage", "data": stages[name]}
 
-        cancel = threading.Event()
+        if cancel is None:
+            cancel = threading.Event()
         q: "queue.Queue" = queue.Queue()
         worker = None
         current = "prompt_received"
@@ -332,6 +337,8 @@ class ModelService:
                     }}
 
                 worker.join()
+                if cancel.is_set():
+                    return  # client disconnected; nothing left to send
                 if errors:
                     raise errors[0]
                 if first_t is None:
@@ -345,7 +352,8 @@ class ModelService:
                 current = "response_decoding"
                 yield emit(current, "processing")
                 t = time.perf_counter()
-                response = self.tokenizer.decode(ids, skip_special_tokens=True)
+                response = self.tokenizer.decode(
+                    ids, skip_special_tokens=True).rstrip("\ufffd")
                 yield emit(current, "completed", _ms(t),
                            note="Final full decode pass; live decoding ran per token")
 
